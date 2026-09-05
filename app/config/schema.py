@@ -34,17 +34,27 @@ class EnrichmentConfig(BaseModel):
     content_filter: ContentFilterConfig | None = None
 
 
-class RateLimitConfig(BaseModel):
-    """Token-bucket parameters. Declared now, enforced in a later phase."""
+class TierLimitConfig(BaseModel):
+    requests_per_minute: int | None = None
+    tokens_per_minute: int | None = None
 
-    burst_capacity: int | None = None
-    refill_rate: float | None = None
+
+class RateLimitConfig(BaseModel):
+    """Per-team rate limits. Total capacity split 70/30 between realtime and
+    batch tiers unless per-tier limits are provided."""
+
+    requests_per_minute: int | None = None
+    tokens_per_minute: int | None = None
+    tiers: dict[str, TierLimitConfig] = Field(default_factory=dict)
 
 
 class BudgetConfig(BaseModel):
-    """Per-team spend ceiling. Declared now, enforced in a later phase."""
+    """Per-team USD spend ceiling."""
 
-    monthly_limit_usd: float | None = None
+    amount_usd: float | None = None
+    window: Literal["monthly", "daily"] = "monthly"
+    warn_at: float = 0.8
+    alert_webhook: str | None = None
 
 
 class TeamConfig(BaseModel):

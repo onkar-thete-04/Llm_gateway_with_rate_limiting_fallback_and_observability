@@ -24,6 +24,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "respx>=0.21",
+    "fakeredis>=2.23",
+    "lupa>=2.0",
 ]
 
 [tool.setuptools.packages.find]

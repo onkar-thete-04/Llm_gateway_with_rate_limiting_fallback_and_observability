@@ -22,6 +22,7 @@ class UnifiedChatRequest(BaseModel):
     model: str
     messages: list[UnifiedMessage] = Field(min_length=1)
     stream: bool = False
+    priority: Literal["realtime", "batch"] = "batch"
     temperature: float | None = None
     max_tokens: int | None = None
     top_p: float | None = None

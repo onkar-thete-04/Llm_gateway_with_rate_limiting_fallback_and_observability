@@ -41,6 +41,12 @@ class ConfigStore:
                 return team
         return None
 
+    def team_by_name(self, name: str) -> TeamConfig | None:
+        for team in self._config.teams:
+            if team.name == name:
+                return team
+        return None
+
     def provider_by_name(self, name: str) -> ProviderConfig | None:
         for provider in self._config.providers:
             if provider.name == name:

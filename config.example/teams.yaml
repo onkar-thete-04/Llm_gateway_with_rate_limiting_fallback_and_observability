@@ -10,6 +10,13 @@ teams:
       - anthropic
       - ollama
     default_provider: openai
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 120000
+    budget:
+      amount_usd: 100.0
+      window: monthly
+      warn_at: 0.8
     enrichment:
       system_prompt: "You are a helpful assistant for Acme Corp."
       disclaimer: "Responses are provided for internal use only."
@@ -27,3 +34,6 @@ teams:
       - ollama
       - groq
     default_provider: groq
+    rate_limit:
+      requests_per_minute: 20
+      tokens_per_minute: 40000

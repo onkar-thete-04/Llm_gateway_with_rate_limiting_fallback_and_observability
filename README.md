@@ -18,8 +18,13 @@ normalizes requests and responses across providers.
   logging for observability.
 - **Request enrichment** — per-team system prompts, compliance disclaimers,
   content filters.
-- **Resilience** (later phases) — rate limiting, budgets, provider fallback,
-  circuit breaker.
+- **Rate limiting** — per-team RPM + TPM token buckets (Redis Lua, atomic),
+  tiered priority (realtime 70% / batch 30%).
+- **Budget caps** — per-team monthly/daily USD spend, warn at 80%, block at
+  100%.
+- **Admin API** — live status, limit/budget overrides, spending, alerts, audit
+  log.
+- **Resilience** (later phases) — provider fallback, circuit breaker.
 
 ## Tech Stack
 
@@ -31,7 +36,7 @@ Docker + docker-compose. See `tech-stack.md`.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 | Unified proxy layer (provider abstraction, auth+routing, streaming, enrichment) | Done |
-| 2 | Rate limiting + budgets (Redis token bucket) | Planned |
+| 2 | Rate limiting + budgets (Redis token bucket) | Done |
 | 3 | Provider fallback + circuit breaker | Planned |
 | 4 | Observability stack (OTel, Prometheus, Grafana) | Planned |
 
@@ -63,12 +68,32 @@ YAML config under `app/config/` (see `config.example/`). Hot-reloadable via a
 polling watcher (2s interval). Provider API keys are resolved from environment
 variables referenced by `api_key_ref`.
 
+- `teams.yaml` — teams, API keys, allowed models/providers, `rate_limit`
+  (RPM/TPM, optional per-tier), `budget` (amount/window/warn_at), enrichment.
+- `providers.yaml` — provider endpoints, models, `api_key_ref`.
+- `pricing.yaml` — per-model USD price per 1M tokens (placeholder values).
+
+Rate limits are enforced fail-closed: if Redis is unreachable the gateway
+returns `503` rather than bypassing limits.
+
 ## API
 
 - `POST /v1/chat/completions` — OpenAI-compatible chat completions
+  (`priority: "realtime" | "batch"` field, default `batch`)
 - `GET /models` — list models available to the team
 - `GET /health` — health check
 - `GET /metrics` — Prometheus metrics
+
+## Admin API
+
+Requires `LLM_GATEWAY_ADMIN_KEY` (env var), sent as `Authorization: Bearer`.
+
+- `GET  /admin/teams/{team}/status` — rate limit + budget status
+- `PUT  /admin/teams/{team}/limits` — override RPM/TPM
+- `PUT  /admin/teams/{team}/budget` — override budget amount/window
+- `GET  /admin/teams/{team}/spending` — spend history
+- `GET  /admin/audit` — audit log of admin changes
+- `POST /admin/teams/{team}/alerts` — set warn threshold + webhook
 
 ## Design Docs
 

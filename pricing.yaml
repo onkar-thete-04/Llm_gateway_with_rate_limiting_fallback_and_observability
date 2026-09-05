@@ -1,0 +1,24 @@
+# Per-model pricing, USD per 1M tokens.
+# Placeholder values — replace with real contract pricing before production.
+models:
+  gpt-4o:
+    input_price_per_1m: 2.50
+    output_price_per_1m: 10.00
+  gpt-4o-mini:
+    input_price_per_1m: 0.15
+    output_price_per_1m: 0.60
+  claude-3-5-sonnet:
+    input_price_per_1m: 3.00
+    output_price_per_1m: 15.00
+  claude-3-haiku:
+    input_price_per_1m: 0.25
+    output_price_per_1m: 1.25
+  llama3.1:
+    input_price_per_1m: 0.0
+    output_price_per_1m: 0.0
+  groq-llama3:
+    input_price_per_1m: 0.05
+    output_price_per_1m: 0.08
+  groq-mixtral:
+    input_price_per_1m: 0.27
+    output_price_per_1m: 0.27

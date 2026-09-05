@@ -1,11 +1,20 @@
+import fakeredis.aioredis
 import httpx
 import pytest
 
+import app.main as main
 from app.config.schema import (
     GatewayConfig,
     ProviderConfig,
     TeamConfig,
 )
+
+
+@pytest.fixture(autouse=True)
+def _fake_redis(monkeypatch):
+    monkeypatch.setattr(
+        main.redis, "from_url", lambda *a, **k: fakeredis.aioredis.FakeRedis()
+    )
 
 
 @pytest.fixture

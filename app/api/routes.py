@@ -15,6 +15,8 @@ from app.api.deps import get_registry, get_team
 from app.config.schema import TeamConfig
 from app.core.policy import PolicyError
 from app.enrich.enricher import EnrichmentBlockError, enrich
+from app.limits.budget import BudgetError
+from app.limits.rate_limiter import RateLimitError, estimate_input_tokens
 from app.providers.base import ProviderError
 from app.routing.router import Route, RouteError, route
 
@@ -23,10 +25,18 @@ logger = logging.getLogger("llm-gateway")
 router = APIRouter()
 
 
-def _unified_error(message: str, type_: str, code: int, status_code: int) -> JSONResponse:
+def _unified_error(
+    message: str,
+    type_: str,
+    code: int,
+    status_code: int,
+    retry_after: int | None = None,
+) -> JSONResponse:
+    headers = {"Retry-After": str(retry_after)} if retry_after is not None else None
     return JSONResponse(
         status_code=status_code,
         content=schemas.UnifiedError(message=message, type=type_, code=code).model_dump(),
+        headers=headers,
     )
 
 
@@ -48,7 +58,7 @@ async def chat_completions(
             enrich(payload, team)
             policy = getattr(request.app.state, "policy", None)
             if policy is not None:
-                policy.check(team, payload)
+                await policy.check(team, payload)
             resolved: Route = route(team, payload.model, registry)
             provider_name = resolved.provider_name
             span.set_attribute("provider", provider_name)
@@ -58,6 +68,12 @@ async def chat_completions(
         except RouteError as exc:
             observability.record_request(team.name, provider_name, "error")
             return _unified_error(str(exc), "routing_error", exc.status_code, exc.status_code)
+        except RateLimitError as exc:
+            observability.record_request(team.name, provider_name, "rate_limited")
+            return _unified_error(str(exc), "rate_limit", 429, 429, retry_after=exc.retry_after)
+        except BudgetError as exc:
+            observability.record_request(team.name, provider_name, "budget_exceeded")
+            return _unified_error(str(exc), "budget_exceeded", 429, 429)
         except PolicyError as exc:
             observability.record_request(team.name, provider_name, "rejected")
             return _unified_error(str(exc), "policy_error", exc.status_code, exc.status_code)
@@ -65,7 +81,7 @@ async def chat_completions(
         try:
             if payload.stream:
                 return StreamingResponse(
-                    _stream_response(resolved, payload, team, started),
+                    _stream_response(resolved, payload, team, started, request),
                     media_type="text/event-stream",
                 )
             response = await resolved.adapter.complete(payload)
@@ -73,6 +89,17 @@ async def chat_completions(
             observability.record_request(team.name, provider_name, "error")
             span.record_exception(exc)
             return _unified_error(str(exc), "provider_error", exc.status_code, exc.status_code)
+
+        policy = getattr(request.app.state, "policy", None)
+        if policy is not None:
+            await policy.record(
+                team,
+                payload,
+                {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                },
+            )
 
         observability.record_request(team.name, provider_name, "success")
         observability.record_tokens(
@@ -92,6 +119,7 @@ async def _stream_response(
     payload: schemas.UnifiedChatRequest,
     team: TeamConfig,
     started: float,
+    request: Request,
 ) -> AsyncIterator[str]:
     provider_name = resolved.provider_name
     full_parts: list[str] = []
@@ -121,6 +149,16 @@ async def _stream_response(
             provider_name,
             len("".join(full_parts)),
         )
+        policy = getattr(request.app.state, "policy", None)
+        if policy is not None:
+            await policy.record(
+                team,
+                payload,
+                {
+                    "prompt_tokens": estimate_input_tokens(payload),
+                    "completion_tokens": len("".join(full_parts)) // 4,
+                },
+            )
 
 
 @router.get("/models")
