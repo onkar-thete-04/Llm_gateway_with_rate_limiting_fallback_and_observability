@@ -1,0 +1,30 @@
+providers:
+  - name: openai
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key_ref: OPENAI_API_KEY
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+
+  - name: anthropic
+    type: anthropic
+    base_url: https://api.anthropic.com/v1
+    api_key_ref: ANTHROPIC_API_KEY
+    models:
+      - claude-3-5-sonnet
+      - claude-3-haiku
+
+  - name: ollama
+    type: ollama
+    base_url: http://localhost:11434
+    models:
+      - llama3.1
+
+  - name: groq
+    type: groq
+    base_url: https://api.groq.com/openai/v1
+    api_key_ref: GROQ_API_KEY
+    models:
+      - groq-llama3
+      - groq-mixtral

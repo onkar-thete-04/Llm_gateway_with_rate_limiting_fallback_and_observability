@@ -1,0 +1,29 @@
+teams:
+  - name: acme
+    api_key: team_acme_secret_key
+    allowed_models:
+      - gpt-4o
+      - claude-3-5-sonnet
+      - llama3.1
+    allowed_providers:
+      - openai
+      - anthropic
+      - ollama
+    default_provider: openai
+    enrichment:
+      system_prompt: "You are a helpful assistant for Acme Corp."
+      disclaimer: "Responses are provided for internal use only."
+      content_filter:
+        rules:
+          - pattern: "confidential"
+            block: true
+
+  - name: beta
+    api_key: team_beta_secret_key
+    allowed_models:
+      - llama3.1
+      - groq-llama3
+    allowed_providers:
+      - ollama
+      - groq
+    default_provider: groq
