@@ -25,11 +25,17 @@ from app.config.schema import ProviderConfig
 
 
 class ProviderError(Exception):
-    """Raised when a provider call fails in a way the caller can see."""
+    """Raised when a provider call fails in a way the caller can see.
 
-    def __init__(self, message: str, status_code: int = 502) -> None:
+    ``status_code`` is the gateway-facing status. ``retryable`` marks errors
+    worth retrying or failing over on (timeouts, 429, 5xx), as opposed to
+    auth failures or content-policy rejections.
+    """
+
+    def __init__(self, message: str, status_code: int = 502, retryable: bool = False) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retryable = retryable
 
 
 class ProviderAdapter(ABC):
@@ -88,7 +94,18 @@ class ProviderAdapter(ABC):
     async def complete(self, req: UnifiedChatRequest) -> UnifiedChatResponse:
         request_id = self._new_id()
         body = self.translate_request(req)
-        resp = await self.client.post(self._endpoint(), json=body, headers=self._headers())
+        try:
+            resp = await self.client.post(self._endpoint(), json=body, headers=self._headers())
+        except httpx.TimeoutException as exc:
+            raise ProviderError(
+                f"{self.provider_type} timed out", status_code=504, retryable=True
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ProviderError(
+                f"{self.provider_type} connection error: {exc}",
+                status_code=502,
+                retryable=True,
+            ) from exc
         data = self._parse_json(resp)
         return self.translate_response(data, req.model, request_id)
 
@@ -96,13 +113,24 @@ class ProviderAdapter(ABC):
         request_id = self._new_id()
         body = self.translate_request(req)
         body = {**body, "stream": True}
-        async with self.client.stream(
-            "POST", self._endpoint(), json=body, headers=self._headers()
-        ) as resp:
-            async for data in self._iter_stream_events(resp):
-                chunk = self.translate_stream_chunk(data, req.model, request_id)
-                if chunk is not None:
-                    yield chunk
+        try:
+            async with self.client.stream(
+                "POST", self._endpoint(), json=body, headers=self._headers()
+            ) as resp:
+                async for data in self._iter_stream_events(resp):
+                    chunk = self.translate_stream_chunk(data, req.model, request_id)
+                    if chunk is not None:
+                        yield chunk
+        except httpx.TimeoutException as exc:
+            raise ProviderError(
+                f"{self.provider_type} timed out", status_code=504, retryable=True
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ProviderError(
+                f"{self.provider_type} connection error: {exc}",
+                status_code=502,
+                retryable=True,
+            ) from exc
 
     async def _iter_stream_events(self, resp: httpx.Response) -> AsyncIterator[dict[str, Any]]:
         """Default: OpenAI-style SSE. Subclasses may override for NDJSON or
@@ -126,14 +154,16 @@ class ProviderAdapter(ABC):
                 detail = str(resp.json())
             except Exception:
                 pass
+            retryable = resp.status_code == 429 or resp.status_code >= 500
             raise ProviderError(
                 f"provider returned {resp.status_code}: {detail}",
                 status_code=502,
+                retryable=retryable,
             )
         try:
             return resp.json()
         except json.JSONDecodeError as exc:
-            raise ProviderError("provider returned non-JSON response") from exc
+            raise ProviderError("provider returned non-JSON response", retryable=True) from exc
 
 
 def _choice(
