@@ -28,3 +28,34 @@ providers:
     models:
       - groq-llama3
       - groq-mixtral
+
+resilience:
+  model_tiers:
+    gpt-4o: premium
+    gpt-4o-mini: premium
+    claude-3-5-sonnet: premium
+    claude-3-haiku: standard
+    llama3.1: standard
+    groq-llama3: standard
+    groq-mixtral: standard
+  tiers:
+    premium:
+      - provider: openai
+        model: gpt-4o
+      - provider: anthropic
+        model: claude-3-5-sonnet
+    standard:
+      - provider: groq
+        model: groq-llama3
+      - provider: ollama
+        model: llama3.1
+  circuit_breaker:
+    failure_threshold: 5
+    window_seconds: 60
+    cooldown_seconds: 30
+  health_check:
+    interval_seconds: 30
+    degraded_error_rate: 0.05
+    down_error_rate: 0.25
+    p99_threshold_ms: 5000
+    history_size: 100
