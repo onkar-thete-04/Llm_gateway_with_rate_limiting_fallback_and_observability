@@ -9,6 +9,8 @@ import logging
 import time
 from enum import Enum
 
+from app import observability
+
 logger = logging.getLogger("llm-gateway.circuit")
 
 
@@ -35,6 +37,7 @@ class CircuitBreaker:
         self.state = CircuitState.CLOSED
         self._failures: list[float] = []
         self._opened_at = 0.0
+        observability.set_circuit_state(name, CircuitState.CLOSED.value)
 
     def allow(self) -> bool:
         """Whether a request may proceed right now."""
@@ -72,6 +75,10 @@ class CircuitBreaker:
     def _transition(self, new_state: CircuitState) -> None:
         old = self.state
         self.state = new_state
+        observability.set_circuit_state(self.name, new_state.value)
+        observability.record_circuit_transition(
+            self.name, old.value, new_state.value
+        )
         logger.info(
             "circuit %s: %s -> %s",
             self.name,
