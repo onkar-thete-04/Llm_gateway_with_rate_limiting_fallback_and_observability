@@ -113,7 +113,3 @@ Requires `LLM_GATEWAY_ADMIN_KEY` (env var), sent as `Authorization: Bearer`.
 - `GET  /admin/teams/{team}/spending` — spend history
 - `GET  /admin/audit` — audit log of admin changes
 - `POST /admin/teams/{team}/alerts` — set warn threshold + webhook
-
-## Design Docs
-
-- `docs/superpowers/specs/` — phase design specs
