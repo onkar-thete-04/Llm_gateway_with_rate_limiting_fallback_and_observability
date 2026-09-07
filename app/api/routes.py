@@ -59,8 +59,12 @@ async def chat_completions(
             policy = getattr(request.app.state, "policy", None)
             if policy is not None:
                 await policy.check(team, payload)
-            resolved: Route = route(team, payload.model, registry)
-            provider_name = resolved.provider_name
+            manager = getattr(request.app.state, "resilience", None)
+            if manager is not None:
+                routes: list[Route] = manager.plan(team, payload.model, registry)
+            else:
+                routes = [route(team, payload.model, registry)]
+            provider_name = routes[0].provider_name
             span.set_attribute("provider", provider_name)
         except EnrichmentBlockError as exc:
             observability.record_request(team.name, provider_name, "blocked")
@@ -78,13 +82,17 @@ async def chat_completions(
             observability.record_request(team.name, provider_name, "rejected")
             return _unified_error(str(exc), "policy_error", exc.status_code, exc.status_code)
 
+        model_used = payload.model
         try:
             if payload.stream:
                 return StreamingResponse(
-                    _stream_response(resolved, payload, team, started, request),
+                    _stream_response(routes, payload, team, started, request),
                     media_type="text/event-stream",
                 )
-            response = await resolved.adapter.complete(payload)
+            if manager is not None:
+                response, provider_name, model_used = await manager.execute(team, payload, routes)
+            else:
+                response = await routes[0].adapter.complete(payload)
         except ProviderError as exc:
             observability.record_request(team.name, provider_name, "error")
             span.record_exception(exc)
@@ -94,7 +102,7 @@ async def chat_completions(
         if policy is not None:
             await policy.record(
                 team,
-                payload,
+                payload.model_copy(update={"model": model_used}),
                 {
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
@@ -115,16 +123,22 @@ async def chat_completions(
 
 
 async def _stream_response(
-    resolved: Route,
+    routes: list[Route],
     payload: schemas.UnifiedChatRequest,
     team: TeamConfig,
     started: float,
     request: Request,
 ) -> AsyncIterator[str]:
-    provider_name = resolved.provider_name
+    provider_name = routes[0].provider_name
     full_parts: list[str] = []
+    manager = getattr(request.app.state, "resilience", None)
     try:
-        async for chunk in resolved.adapter.stream(payload):
+        chunks = (
+            manager.execute_stream(payload, routes)
+            if manager is not None
+            else routes[0].adapter.stream(payload)
+        )
+        async for chunk in chunks:
             for choice in chunk.choices:
                 if choice.message.content:
                     full_parts.append(choice.message.content)

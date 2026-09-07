@@ -24,7 +24,9 @@ normalizes requests and responses across providers.
   100%.
 - **Admin API** — live status, limit/budget overrides, spending, alerts, audit
   log.
-- **Resilience** (later phases) — provider fallback, circuit breaker.
+- **Resilience** — health monitoring (30s probes, rolling error-rate + p99),
+  fallback chains per model tier, retry with exponential backoff, circuit
+  breakers.
 
 ## Tech Stack
 
@@ -37,7 +39,7 @@ Docker + docker-compose. See `tech-stack.md`.
 |-------|-------|--------|
 | 1 | Unified proxy layer (provider abstraction, auth+routing, streaming, enrichment) | Done |
 | 2 | Rate limiting + budgets (Redis token bucket) | Done |
-| 3 | Provider fallback + circuit breaker | Planned |
+| 3 | Provider fallback + circuit breaker | Done |
 | 4 | Observability stack (OTel, Prometheus, Grafana) | Planned |
 
 ## Setup
@@ -70,11 +72,28 @@ variables referenced by `api_key_ref`.
 
 - `teams.yaml` — teams, API keys, allowed models/providers, `rate_limit`
   (RPM/TPM, optional per-tier), `budget` (amount/window/warn_at), enrichment.
-- `providers.yaml` — provider endpoints, models, `api_key_ref`.
+- `providers.yaml` — provider endpoints, models, `api_key_ref`, plus a
+  `resilience` block: `model_tiers`, fallback `tiers` (ordered provider hops),
+  `circuit_breaker` (N failures / M seconds / cooldown), `health_check`.
 - `pricing.yaml` — per-model USD price per 1M tokens (placeholder values).
 
 Rate limits are enforced fail-closed: if Redis is unreachable the gateway
 returns `503` rather than bypassing limits.
+
+### Resilience behavior
+
+- A request maps to a fallback tier via `model_tiers`, yielding an ordered
+  provider chain (`tiers`). Primary provider tried first.
+- Per provider: up to 3 retries with exponential backoff on retryable errors
+  (timeouts, 429, 5xx). Non-retryable errors (auth, content policy) fail
+  immediately.
+- Retryable errors that exhaust retries fail over to the next provider in the
+  chain. Fallback applies before a stream starts; no fallback after the first
+  chunk is emitted.
+- Circuit breaker opens after N failures in M seconds, stops all traffic,
+  then half-opens after cooldown with a single probe.
+- Health history persisted to Redis (`health:{provider}:{model}`) as a bounded
+  list for post-incident analysis.
 
 ## API
 

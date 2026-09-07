@@ -26,6 +26,7 @@ class RouteError(Exception):
 class Route:
     adapter: ProviderAdapter
     provider_name: str
+    model: str | None = None
 
 
 def _provider_can_serve(adapter: ProviderAdapter, model: str) -> bool:
@@ -53,7 +54,7 @@ def route(team: TeamConfig, model: str, registry: ProviderRegistry) -> Route:
     if team.default_provider:
         for name, adapter in candidates:
             if name == team.default_provider:
-                return Route(adapter=adapter, provider_name=name)
+                return Route(adapter=adapter, provider_name=name, model=model)
 
     name, adapter = candidates[0]
-    return Route(adapter=adapter, provider_name=name)
+    return Route(adapter=adapter, provider_name=name, model=model)
