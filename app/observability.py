@@ -29,6 +29,18 @@ TOKENS = Counter(
     ["team", "provider", "type"],
 )
 
+FALLBACKS = Counter(
+    "llm_gateway_fallbacks_total",
+    "Requests failed over to a fallback provider",
+    ["team", "provider"],
+)
+
+RETRIES = Counter(
+    "llm_gateway_retries_total",
+    "Provider call retries",
+    ["provider"],
+)
+
 
 def record_request(team: str, provider: str, status: str) -> None:
     REQUESTS.labels(team=team, provider=provider, status=status).inc()
