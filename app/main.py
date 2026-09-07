@@ -4,11 +4,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
+import time
 from contextlib import asynccontextmanager
 
 import httpx
 import redis.asyncio as redis
 from fastapi import FastAPI
+from starlette.datastructures import Headers
 
 from app.admin.alerts import AlertManager
 from app.admin.audit import AuditLog
@@ -27,6 +30,7 @@ from app.resilience.circuit import CircuitRegistry
 from app.resilience.fallback import FallbackPlanner
 from app.resilience.health import HealthMonitor
 from app.resilience.manager import ResilienceManager
+from app import tracing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("llm-gateway")
@@ -131,3 +135,36 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="LLM Gateway", version="0.3.0", lifespan=lifespan)
 app.include_router(router)
 app.include_router(admin_router)
+
+
+class TracingMiddleware:
+    """Pure ASGI middleware: opens the root trace span per HTTP request.
+
+    Uses raw ASGI (not Starlette's BaseHTTPMiddleware) so the OTel context is
+    preserved for the endpoint and dependency layers.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = time.monotonic()
+        root_cm, root_span, ctx = tracing.start_receipt(Headers(scope=scope))
+        token = tracing.set_ctx(ctx)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            try:
+                tracing.apply_attrs(root_span, ctx)
+                root_span.set_attribute(
+                    "latency_ms", (time.monotonic() - started) * 1000.0
+                )
+            finally:
+                root_cm.__exit__(*sys.exc_info())
+                tracing.reset_ctx(token)
+
+
+app.add_middleware(TracingMiddleware)

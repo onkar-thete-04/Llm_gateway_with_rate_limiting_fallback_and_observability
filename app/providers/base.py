@@ -13,6 +13,7 @@ from typing import Any, AsyncIterator, Mapping
 
 import httpx
 
+from app import tracing
 from app.api.schemas import (
     UnifiedChatRequest,
     UnifiedChatResponse,
@@ -62,6 +63,7 @@ class ProviderAdapter(ABC):
         api_key = self._api_key()
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        tracing.inject_headers(headers)
         return headers
 
     def _endpoint(self) -> str:
