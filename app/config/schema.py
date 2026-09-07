@@ -57,6 +57,41 @@ class BudgetConfig(BaseModel):
     alert_webhook: str | None = None
 
 
+class CircuitBreakerConfig(BaseModel):
+    """Open after ``failure_threshold`` failures within ``window_seconds``.
+    After ``cooldown_seconds``, a single half-open probe is allowed."""
+
+    failure_threshold: int = 5
+    window_seconds: float = 60.0
+    cooldown_seconds: float = 30.0
+
+
+class HealthCheckConfig(BaseModel):
+    """Background health-probe tuning and status thresholds."""
+
+    interval_seconds: float = 30.0
+    degraded_error_rate: float = 0.05
+    down_error_rate: float = 0.25
+    p99_threshold_ms: float = 5000.0
+    history_size: int = 100
+
+
+class FallbackHop(BaseModel):
+    """One entry in a model-tier fallback chain."""
+
+    provider: str
+    model: str
+
+
+class ResilienceConfig(BaseModel):
+    """Fallback chains (per model tier), circuit breaker, health check."""
+
+    model_tiers: dict[str, str] = Field(default_factory=dict)
+    tiers: dict[str, list[FallbackHop]] = Field(default_factory=dict)
+    circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
+    health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
+
+
 class TeamConfig(BaseModel):
     name: str
     api_key: str
@@ -81,7 +116,8 @@ class ProviderConfig(BaseModel):
 
 
 class GatewayConfig(BaseModel):
-    """Top-level config: teams + providers."""
+    """Top-level config: teams + providers + resilience."""
 
     teams: list[TeamConfig] = Field(default_factory=list)
     providers: list[ProviderConfig] = Field(default_factory=list)
+    resilience: ResilienceConfig | None = None

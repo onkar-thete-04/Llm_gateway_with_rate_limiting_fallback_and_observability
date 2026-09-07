@@ -17,7 +17,7 @@ from typing import Callable, Mapping
 
 import yaml
 
-from .schema import GatewayConfig, ProviderConfig, TeamConfig
+from .schema import GatewayConfig, ProviderConfig, ResilienceConfig, TeamConfig
 
 
 class ConfigError(Exception):
@@ -80,7 +80,11 @@ def load_config(
     teams = [TeamConfig.model_validate(item) for item in teams_raw.get("teams", [])]
     providers = [ProviderConfig.model_validate(item) for item in providers_raw.get("providers", [])]
 
-    config = GatewayConfig(teams=teams, providers=providers)
+    resilience = None
+    if providers_raw.get("resilience"):
+        resilience = ResilienceConfig.model_validate(providers_raw["resilience"])
+
+    config = GatewayConfig(teams=teams, providers=providers, resilience=resilience)
     return ConfigStore(config, secrets)
 
 
