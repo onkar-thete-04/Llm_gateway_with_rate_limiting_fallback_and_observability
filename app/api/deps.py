@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
+from app import tracing
 from app.config.schema import TeamConfig
 
 
@@ -15,14 +16,17 @@ def get_registry(request: Request):
 
 
 def get_team(request: Request) -> TeamConfig:
-    store = request.app.state.config_store
-    api_key = _extract_api_key(request)
-    if not api_key:
-        raise HTTPException(status_code=401, detail="missing API key")
-    team = store.team_by_key(api_key)
-    if team is None:
-        raise HTTPException(status_code=401, detail="invalid API key")
-    return team
+    ctx = tracing.current_ctx()
+    with tracing.span(tracing.SPAN_AUTHENTICATION, ctx):
+        store = request.app.state.config_store
+        api_key = _extract_api_key(request)
+        if not api_key:
+            raise HTTPException(status_code=401, detail="missing API key")
+        team = store.team_by_key(api_key)
+        if team is None:
+            raise HTTPException(status_code=401, detail="invalid API key")
+        ctx.team_id = team.name
+        return team
 
 
 def _extract_api_key(request: Request) -> str | None:

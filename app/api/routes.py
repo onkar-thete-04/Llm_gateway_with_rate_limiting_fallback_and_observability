@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from app import observability
+from app import observability, tracing
 from app.api import schemas
 from app.api.deps import get_registry, get_team
 from app.config.schema import TeamConfig
@@ -49,55 +49,83 @@ async def chat_completions(
 ):
     started = time.monotonic()
     provider_name = "none"
+    ctx = tracing.current_ctx()
+    ctx.model_requested = payload.model
 
-    with observability.tracer.start_as_current_span("chat_completions") as span:
-        span.set_attribute("team", team.name)
-        span.set_attribute("model", payload.model)
-
+    with tracing.span(tracing.SPAN_RATE_LIMIT, ctx):
         try:
             enrich(payload, team)
             policy = getattr(request.app.state, "policy", None)
             if policy is not None:
                 await policy.check(team, payload)
+        except EnrichmentBlockError as exc:
+            observability.record_request(team.name, payload.model, provider_name, "blocked")
+            observability.record_error(team.name, payload.model, provider_name, "content_filter")
+            return _unified_error(str(exc), "content_filter", 400, 400)
+        except RateLimitError as exc:
+            observability.record_request(team.name, payload.model, provider_name, "rate_limited")
+            observability.record_error(team.name, payload.model, provider_name, "rate_limit")
+            return _unified_error(str(exc), "rate_limit", 429, 429, retry_after=exc.retry_after)
+        except BudgetError as exc:
+            observability.record_request(team.name, payload.model, provider_name, "budget_exceeded")
+            observability.record_error(team.name, payload.model, provider_name, "budget_exceeded")
+            return _unified_error(str(exc), "budget_exceeded", 429, 429)
+        except PolicyError as exc:
+            observability.record_request(team.name, payload.model, provider_name, "rejected")
+            observability.record_error(team.name, payload.model, provider_name, "policy_error")
+            return _unified_error(str(exc), "policy_error", exc.status_code, exc.status_code)
+
+    with tracing.span(tracing.SPAN_PROVIDER_SELECTION, ctx):
+        try:
             manager = getattr(request.app.state, "resilience", None)
             if manager is not None:
                 routes: list[Route] = manager.plan(team, payload.model, registry)
             else:
                 routes = [route(team, payload.model, registry)]
             provider_name = routes[0].provider_name
-            span.set_attribute("provider", provider_name)
-        except EnrichmentBlockError as exc:
-            observability.record_request(team.name, provider_name, "blocked")
-            return _unified_error(str(exc), "content_filter", 400, 400)
+            ctx.model_served = routes[0].model or payload.model
         except RouteError as exc:
-            observability.record_request(team.name, provider_name, "error")
+            observability.record_request(team.name, payload.model, provider_name, "error")
+            observability.record_error(team.name, payload.model, provider_name, "routing_error")
             return _unified_error(str(exc), "routing_error", exc.status_code, exc.status_code)
-        except RateLimitError as exc:
-            observability.record_request(team.name, provider_name, "rate_limited")
-            return _unified_error(str(exc), "rate_limit", 429, 429, retry_after=exc.retry_after)
-        except BudgetError as exc:
-            observability.record_request(team.name, provider_name, "budget_exceeded")
-            return _unified_error(str(exc), "budget_exceeded", 429, 429)
-        except PolicyError as exc:
-            observability.record_request(team.name, provider_name, "rejected")
-            return _unified_error(str(exc), "policy_error", exc.status_code, exc.status_code)
 
-        model_used = payload.model
-        try:
-            if payload.stream:
-                return StreamingResponse(
-                    _stream_response(routes, payload, team, started, request),
-                    media_type="text/event-stream",
+    model_used = payload.model
+    if payload.stream:
+        return StreamingResponse(
+            _stream_response(routes, payload, team, started, request, ctx),
+            media_type="text/event-stream",
+        )
+
+    try:
+        with tracing.span(tracing.SPAN_LLM_CALL, ctx) as llm_span:
+            try:
+                if manager is not None:
+                    response, provider_name, model_used = await manager.execute(
+                        team, payload, routes
+                    )
+                else:
+                    response = await routes[0].adapter.complete(payload)
+            except ProviderError as exc:
+                llm_span.record_exception(exc)
+                raise
+            ctx.model_served = model_used
+            ctx.set_tokens(
+                response.usage.prompt_tokens, response.usage.completion_tokens
+            )
+            pricing = getattr(request.app.state, "pricing", None)
+            if pricing is not None:
+                ctx.cost_usd = pricing.cost_usd(
+                    model_used,
+                    response.usage.prompt_tokens,
+                    response.usage.completion_tokens,
                 )
-            if manager is not None:
-                response, provider_name, model_used = await manager.execute(team, payload, routes)
-            else:
-                response = await routes[0].adapter.complete(payload)
-        except ProviderError as exc:
-            observability.record_request(team.name, provider_name, "error")
-            span.record_exception(exc)
-            return _unified_error(str(exc), "provider_error", exc.status_code, exc.status_code)
+            tracing.apply_attrs(llm_span, ctx)
+    except ProviderError as exc:
+        observability.record_request(team.name, payload.model, provider_name, "error")
+        observability.record_error(team.name, payload.model, provider_name, "provider_error")
+        return _unified_error(str(exc), "provider_error", exc.status_code, exc.status_code)
 
+    with tracing.span(tracing.SPAN_RESPONSE_PROCESSING, ctx):
         policy = getattr(request.app.state, "policy", None)
         if policy is not None:
             await policy.record(
@@ -109,16 +137,19 @@ async def chat_completions(
                 },
             )
 
-        observability.record_request(team.name, provider_name, "success")
+        observability.record_request(team.name, payload.model, provider_name, "success")
         observability.record_tokens(
             team.name,
             provider_name,
             response.usage.prompt_tokens,
             response.usage.completion_tokens,
         )
+        observability.record_cost(team.name, ctx.cost_usd)
         observability.DURATION.labels(team=team.name, provider=provider_name).observe(
             time.monotonic() - started
         )
+
+    with tracing.span(tracing.SPAN_RESPONSE_DELIVERY, ctx):
         return JSONResponse(content=response.model_dump())
 
 
@@ -128,51 +159,66 @@ async def _stream_response(
     team: TeamConfig,
     started: float,
     request: Request,
+    ctx: tracing.TraceContext,
 ) -> AsyncIterator[str]:
     provider_name = routes[0].provider_name
     full_parts: list[str] = []
     manager = getattr(request.app.state, "resilience", None)
-    try:
-        chunks = (
-            manager.execute_stream(payload, routes)
-            if manager is not None
-            else routes[0].adapter.stream(payload)
-        )
-        async for chunk in chunks:
-            for choice in chunk.choices:
-                if choice.message.content:
-                    full_parts.append(choice.message.content)
-            yield f"data: {chunk.model_dump_json()}\n\n"
-        yield "data: [DONE]\n\n"
-        observability.record_request(team.name, provider_name, "success")
-    except ProviderError as exc:
-        observability.record_request(team.name, provider_name, "error")
-        logger.error("stream failed team=%s provider=%s: %s", team.name, provider_name, exc)
-        error_json = schemas.UnifiedError(
-            message=str(exc), type="provider_error", code=exc.status_code
-        ).model_dump_json()
-        yield f"data: {error_json}\n\n"
-        yield "data: [DONE]\n\n"
-    finally:
-        observability.DURATION.labels(team=team.name, provider=provider_name).observe(
-            time.monotonic() - started
-        )
-        logger.info(
-            "streamed response team=%s provider=%s chars=%d",
-            team.name,
-            provider_name,
-            len("".join(full_parts)),
-        )
-        policy = getattr(request.app.state, "policy", None)
-        if policy is not None:
-            await policy.record(
-                team,
-                payload,
-                {
-                    "prompt_tokens": estimate_input_tokens(payload),
-                    "completion_tokens": len("".join(full_parts)) // 4,
-                },
+    with tracing.span(tracing.SPAN_RESPONSE_DELIVERY, ctx):
+        with tracing.span(tracing.SPAN_LLM_CALL, ctx):
+            try:
+                chunks = (
+                    manager.execute_stream(payload, routes)
+                    if manager is not None
+                    else routes[0].adapter.stream(payload)
+                )
+                async for chunk in chunks:
+                    for choice in chunk.choices:
+                        if choice.message.content:
+                            full_parts.append(choice.message.content)
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+                yield "data: [DONE]\n\n"
+                observability.record_request(team.name, payload.model, provider_name, "success")
+            except ProviderError as exc:
+                observability.record_request(team.name, payload.model, provider_name, "error")
+                observability.record_error(team.name, payload.model, provider_name, "provider_error")
+                logger.error(
+                    "stream failed team=%s provider=%s: %s", team.name, provider_name, exc
+                )
+                error_json = schemas.UnifiedError(
+                    message=str(exc), type="provider_error", code=exc.status_code
+                ).model_dump_json()
+                yield f"data: {error_json}\n\n"
+                yield "data: [DONE]\n\n"
+        with tracing.span(tracing.SPAN_RESPONSE_PROCESSING, ctx):
+            observability.DURATION.labels(
+                team=team.name, provider=provider_name
+            ).observe(time.monotonic() - started)
+            logger.info(
+                "streamed response team=%s provider=%s chars=%d",
+                team.name,
+                provider_name,
+                len("".join(full_parts)),
             )
+            prompt_tokens = estimate_input_tokens(payload)
+            completion_tokens = len("".join(full_parts)) // 4
+            ctx.set_tokens(prompt_tokens, completion_tokens)
+            pricing = getattr(request.app.state, "pricing", None)
+            if pricing is not None:
+                ctx.cost_usd = pricing.cost_usd(
+                    payload.model, prompt_tokens, completion_tokens
+                )
+                observability.record_cost(team.name, ctx.cost_usd)
+            policy = getattr(request.app.state, "policy", None)
+            if policy is not None:
+                await policy.record(
+                    team,
+                    payload,
+                    {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                    },
+                )
 
 
 @router.get("/models")
