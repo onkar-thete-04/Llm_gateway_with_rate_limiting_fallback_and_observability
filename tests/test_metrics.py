@@ -242,6 +242,29 @@ def _req():
     )
 
 
+def test_budget_limit_gauge_set_at_startup():
+    with TestClient(app) as client:
+        value = REGISTRY.get_sample_value(
+            "llm_gateway_budget_limit_usd", {"team": "acme"}
+        )
+    assert value == 100.0
+
+
+def test_budget_limit_gauge_refreshed_on_admin_override(monkeypatch):
+    monkeypatch.setenv("LLM_GATEWAY_ADMIN_KEY", "admin-secret")
+    with TestClient(app) as client:
+        resp = client.put(
+            "/admin/teams/acme/budget",
+            json={"amount_usd": 250.0, "window": "monthly"},
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+    assert resp.status_code == 200
+    value = REGISTRY.get_sample_value(
+        "llm_gateway_budget_limit_usd", {"team": "acme"}
+    )
+    assert value == 250.0
+
+
 @pytest.mark.asyncio
 async def test_provider_status_gauge_set_on_health_record():
     import fakeredis.aioredis

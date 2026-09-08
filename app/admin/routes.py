@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.admin.audit import AuditLog
 from app.admin.deps import require_admin
+from app import observability
 from app.admin.overrides import Overrides
 from app.limits.budget import BudgetChecker, window_key
 
@@ -140,6 +141,7 @@ async def set_budget(
     before = await overrides.get_budget(team)
     await overrides.set_budget(team, body.amount_usd, body.window)
     after = await overrides.get_budget(team)
+    observability.set_budget_limit(team, float(after["amount_usd"]))
 
     await audit.log(admin_key, "set_budget", team, before=before, after=after)
     return {"team": team, "budget": after}

@@ -30,7 +30,7 @@ from app.resilience.circuit import CircuitRegistry
 from app.resilience.fallback import FallbackPlanner
 from app.resilience.health import HealthMonitor
 from app.resilience.manager import ResilienceManager
-from app import tracing
+from app import observability, tracing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("llm-gateway")
@@ -103,6 +103,16 @@ async def lifespan(app: FastAPI):
         overrides=overrides,
         alert_manager=alerts,
     )
+
+    for team in store.config.teams:
+        override = await overrides.get_budget(team.name)
+        if override is not None:
+            limit_usd = float(override.get("amount_usd") or 0.0)
+        elif team.budget is not None and team.budget.amount_usd is not None:
+            limit_usd = team.budget.amount_usd
+        else:
+            limit_usd = 0.0
+        observability.set_budget_limit(team.name, limit_usd)
 
     _build_resilience(app, store)
     health_task = asyncio.create_task(app.state.health.run())

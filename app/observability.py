@@ -73,11 +73,21 @@ PROVIDER_STATUS = Gauge(
     ["provider"],
 )
 
+BUDGET_LIMIT = Gauge(
+    "llm_gateway_budget_limit_usd",
+    "Team budget limit in USD",
+    ["team"],
+)
+
 _HEALTH_STATE_VALUES = {"healthy": 0.0, "degraded": 1.0, "down": 2.0}
 
 
 def set_provider_status(provider: str, status: str) -> None:
     PROVIDER_STATUS.labels(provider=provider).set(_HEALTH_STATE_VALUES[status])
+
+
+def set_budget_limit(team: str, limit_usd: float) -> None:
+    BUDGET_LIMIT.labels(team=team).set(limit_usd)
 
 
 _CIRCUIT_STATE_VALUES = {"closed": 0.0, "open": 1.0, "half_open": 2.0}
