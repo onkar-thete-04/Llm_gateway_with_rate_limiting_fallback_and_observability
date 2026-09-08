@@ -20,7 +20,7 @@ services:
       - redis_data:/data
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.53.0
     ports:
       - "9090:9090"
     volumes:
@@ -33,7 +33,7 @@ services:
       - gateway
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.1.4
     ports:
       - "3000:3000"
     environment:
