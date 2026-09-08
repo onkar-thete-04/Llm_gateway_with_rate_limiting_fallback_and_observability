@@ -18,6 +18,7 @@ from enum import Enum
 import httpx
 
 from app.config.schema import HealthCheckConfig
+from app import observability
 
 logger = logging.getLogger("llm-gateway.health")
 
@@ -28,6 +29,13 @@ class HealthStatus(str, Enum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     DOWN = "down"
+
+
+_STATUS_RANK = {
+    HealthStatus.HEALTHY: 0,
+    HealthStatus.DEGRADED: 1,
+    HealthStatus.DOWN: 2,
+}
 
 
 @dataclass
@@ -110,7 +118,17 @@ class HealthMonitor:
         cutoff = time.monotonic() - _WINDOW_SECONDS
         samples[:] = [s for s in samples if s.ts >= cutoff]
         self._statuses[key] = self._derive(samples)
+        self._export_provider_status(provider)
         await self._persist(provider, model, ok, latency_ms)
+
+    def _export_provider_status(self, provider: str) -> None:
+        worst = HealthStatus.HEALTHY
+        for (prov, _model), status in self._statuses.items():
+            if prov != provider:
+                continue
+            if _STATUS_RANK[status] > _STATUS_RANK[worst]:
+                worst = status
+        observability.set_provider_status(provider, worst.value)
 
     def status(self, provider: str, model: str | None) -> HealthStatus:
         key = (provider, model or "")

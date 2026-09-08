@@ -67,6 +67,19 @@ CIRCUIT_TRANSITIONS = Counter(
     ["provider", "from", "to"],
 )
 
+PROVIDER_STATUS = Gauge(
+    "llm_gateway_provider_status",
+    "Provider health status",
+    ["provider"],
+)
+
+_HEALTH_STATE_VALUES = {"healthy": 0.0, "degraded": 1.0, "down": 2.0}
+
+
+def set_provider_status(provider: str, status: str) -> None:
+    PROVIDER_STATUS.labels(provider=provider).set(_HEALTH_STATE_VALUES[status])
+
+
 _CIRCUIT_STATE_VALUES = {"closed": 0.0, "open": 1.0, "half_open": 2.0}
 
 

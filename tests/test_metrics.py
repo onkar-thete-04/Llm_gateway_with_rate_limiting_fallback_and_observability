@@ -240,3 +240,29 @@ def _req():
     return UnifiedChatRequest(
         model="gpt-4o", messages=[UnifiedMessage(role="user", content="hi")]
     )
+
+
+@pytest.mark.asyncio
+async def test_provider_status_gauge_set_on_health_record():
+    import fakeredis.aioredis
+
+    redis = fakeredis.aioredis.FakeRedis()
+    http_client = httpx.AsyncClient()
+    health = HealthMonitor(lambda: None, http_client, HealthCheckConfig(), redis)
+
+    await health.record("down-provider", "gpt-4o", False, 100.0)
+    await health.record("healthy-provider", "gpt-4o", True, 50.0)
+
+    assert (
+        REGISTRY.get_sample_value(
+            "llm_gateway_provider_status", {"provider": "down-provider"}
+        )
+        == 2.0
+    )
+    assert (
+        REGISTRY.get_sample_value(
+            "llm_gateway_provider_status", {"provider": "healthy-provider"}
+        )
+        == 0.0
+    )
+    await http_client.aclose()
