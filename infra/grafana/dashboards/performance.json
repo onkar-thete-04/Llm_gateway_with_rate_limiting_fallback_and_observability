@@ -1,0 +1,82 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "uid": "llm-gateway-performance",
+  "title": "LLM Gateway - Performance",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "provider",
+        "label": "Provider",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(llm_gateway_requests_total, provider)", "refId": "provider" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Latency p50",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(llm_gateway_request_duration_seconds_bucket[$__rate_interval])) by (le, provider))", "refId": "A", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {}, "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Latency p95",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(llm_gateway_request_duration_seconds_bucket[$__rate_interval])) by (le, provider))", "refId": "A", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {}, "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Latency p99",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.99, sum(rate(llm_gateway_request_duration_seconds_bucket[$__rate_interval])) by (le, provider))", "refId": "A", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {}, "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Token throughput",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(llm_gateway_tokens_total[$__rate_interval])) by (type)", "refId": "A", "legendFormat": "{{type}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Requests per second",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(llm_gateway_requests_total[$__rate_interval])) by (provider)", "refId": "A", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] }
+    }
+  ]
+}
