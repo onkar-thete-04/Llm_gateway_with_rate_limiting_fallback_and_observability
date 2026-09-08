@@ -27,11 +27,14 @@ normalizes requests and responses across providers.
 - **Resilience** — health monitoring (30s probes, rolling error-rate + p99),
   fallback chains per model tier, retry with exponential backoff, circuit
   breakers.
+- **Observability** — OpenTelemetry tracing across the request lifecycle,
+  Prometheus metrics on `/metrics`, and Grafana dashboards (Operations,
+  Business, Performance).
 
 ## Tech Stack
 
 Python 3.11+, FastAPI, Redis, YAML config, OpenTelemetry, Prometheus,
-Docker + docker-compose. See `tech-stack.md`.
+Grafana, Docker + docker-compose. See `tech-stack.md`.
 
 ## Project Status
 
@@ -40,7 +43,9 @@ Docker + docker-compose. See `tech-stack.md`.
 | 1 | Unified proxy layer (provider abstraction, auth+routing, streaming, enrichment) | Done |
 | 2 | Rate limiting + budgets (Redis token bucket) | Done |
 | 3 | Provider fallback + circuit breaker | Done |
-| 4 | Observability stack (OTel, Prometheus, Grafana) | Planned |
+| 4.1 | OpenTelemetry tracing | Done |
+| 4.2 | Prometheus metrics | Done |
+| 4.3 | Grafana dashboards (Operations, Business, Performance) | Done |
 
 ## Setup
 
@@ -63,6 +68,36 @@ Copy `config.example/*.yaml` to `app/config/` (or set `LLM_GATEWAY_CONFIG_DIR`).
 ```powershell
 pytest
 ```
+
+## Observability
+
+- **Tracing** — OpenTelemetry spans across the request lifecycle
+  (`request_receipt`, `authentication`, `rate_limit_check`,
+  `provider_selection`, `llm_call`, `response_processing`,
+  `response_delivery`), with uniform span attributes (team, model, tokens,
+  cost, latency).
+- **Metrics** — Prometheus metrics on `/metrics`: requests, errors, latency
+  histogram, tokens, cost, fallbacks, circuit breaker state/transitions,
+  provider health status, and per-team budget limits.
+- **Dashboards** — three provisioned Grafana dashboards:
+  - *Operations*: provider status, circuit breaker, error rate, fallback
+    events, request rate.
+  - *Business*: per-team spending, budget utilization, usage trends.
+  - *Performance*: latency percentiles (p50/p95/p99), token throughput,
+    requests/sec.
+
+### Full observability stack
+
+`docker-compose.yml` includes Prometheus (scrapes `gateway:8000/metrics` every
+15s, 15d retention) and Grafana (port 3000, anonymous viewer). Provisioned via
+`infra/grafana/provisioning/` and dashboards in `infra/grafana/dashboards/`.
+
+```powershell
+docker compose up --build
+```
+
+Open Grafana at `http://localhost:3000` (dashboards auto-load) and Prometheus
+at `http://localhost:9090`.
 
 ## Config
 
