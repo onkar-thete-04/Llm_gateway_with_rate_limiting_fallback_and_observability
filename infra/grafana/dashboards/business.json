@@ -1,0 +1,103 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "uid": "llm-gateway-business",
+  "title": "LLM Gateway - Business",
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "team",
+        "label": "Team",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(llm_gateway_requests_total, team)", "refId": "team" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Per-team spend",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(increase(llm_gateway_cost_usd_total[$__rate_interval])) by (team)", "refId": "A", "legendFormat": "{{team}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {}, "unit": "currencyUSD" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "bargauge",
+      "title": "Per-team spend (24h)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "sum(increase(llm_gateway_cost_usd_total[24h])) by (team)", "refId": "A", "legendFormat": "{{team}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {}, "unit": "currencyUSD" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Budget utilization",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum(increase(llm_gateway_cost_usd_total[1d])) by (team) / llm_gateway_budget_limit_usd{team=~\"$team\"}", "refId": "A", "legendFormat": "{{team}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.8 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Usage trend - requests",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(llm_gateway_requests_total[$__rate_interval])) by (team)", "refId": "A", "legendFormat": "{{team}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Usage trend - tokens",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(llm_gateway_tokens_total[$__rate_interval])) by (team, type)", "refId": "A", "legendFormat": "{{team}} {{type}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] }
+    }
+  ]
+}
